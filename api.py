@@ -4,8 +4,9 @@ from supabase import create_client
 
 app = FastAPI(title="Vulnerability Intelligence API")
 
-SUPABASE_URL = "SUPABASE_URL"
-SUPABASE_KEY = "SUPABASE_KEY"
+import os
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Statik API Anahtarı Tanımlaması (Güvenlik Kalkanı)
