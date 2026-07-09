@@ -1,9 +1,8 @@
 import os
 import re
-from fastapi import FastAPI, Query, Security, HTTPException, status
+from fastapi import FastAPI, Query, Security, HTTPException, status, Body
 from fastapi.security import APIKeyHeader
 from supabase import create_client
-from pydantic import BaseModel
 
 app = FastAPI(title="TITAN Security API")
 
@@ -22,10 +21,6 @@ def verify_api_key(api_key: str = Security(api_key_header)):
         )
     return api_key
 
-# Request Model for Log Parser
-class LogData(BaseModel):
-    raw_logs: str
-
 # ----------------- TOOLS -----------------
 
 @app.get("/api/v1/vulnerabilities", tags=["Threat Intelligence"])
@@ -41,9 +36,11 @@ def get_critical_vulns(
 
 
 @app.post("/api/v1/tools/log-parser", tags=["Log Analysis"])
-def parse_logs(payload: LogData, api_key: str = Security(verify_api_key)):
+def parse_logs(
+    logs: str = Body(..., media_type="text/plain", description="Paste raw log lines here"), 
+    api_key: str = Security(verify_api_key)
+):
     threats = []
-    logs = payload.raw_logs
 
     # 1. Detect Brute Force
     failed_logins = len(re.findall(r"Failed password", logs))
@@ -63,4 +60,3 @@ def parse_logs(payload: LogData, api_key: str = Security(verify_api_key)):
         })
 
     return {"status": "analyzed", "threats_detected": len(threats), "data": threats}
-    
