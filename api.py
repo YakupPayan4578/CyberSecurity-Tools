@@ -1,5 +1,6 @@
 import os
 import re
+import dns.resolver
 from fastapi import FastAPI, Query, Security, HTTPException, status, Body
 from fastapi.security import APIKeyHeader
 from supabase import create_client
@@ -22,6 +23,29 @@ def verify_api_key(api_key: str = Security(api_key_header)):
     return api_key
 
 # ----------------- TOOLS -----------------
+
+@app.get("/api/v1/tools/dns-enum", tags=["Reconnaissance"])
+def enumerate_subdomains(
+    domain: str = Query(..., description="Target domain (e.g., google.com)"),
+    api_key: str = Security(verify_api_key)
+):
+    # Kapsamlı taramalar (exhaustive scans) API'yi yavaşlatır, bu yüzden şimdilik kısa bir liste kullanıyoruz.
+    wordlist = ["dev", "api", "test", "vpn", "admin", "staging", "mail", "www", "portal", "old"]
+    found = []
+    
+    for word in wordlist:
+        target = f"{word}.{domain}"
+        try:
+            # A kaydı (A record) için DNS sunucusunu sorgula
+            answers = dns.resolver.resolve(target, 'A')
+            ips = [rdata.to_text() for rdata in answers]
+            found.append({"subdomain": target, "ips": ips})
+        except Exception:
+            # NXDOMAIN veya Timeout hatalarını yoksay (ignore)
+            pass
+
+    return {"status": "success", "target": domain, "found_count": len(found), "data": found}
+
 
 @app.get("/api/v1/vulnerabilities", tags=["Threat Intelligence"])
 def get_critical_vulns(
