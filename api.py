@@ -1,6 +1,7 @@
 import os
 import re
 import dns.resolver
+import requests
 from fastapi import FastAPI, Query, Security, HTTPException, status, Body
 from fastapi.security import APIKeyHeader
 from supabase import create_client
@@ -24,28 +25,65 @@ def verify_api_key(api_key: str = Security(api_key_header)):
 
 # ----------------- TOOLS -----------------
 
+@app.get("/api/v1/tools/header-analyzer", tags=["Vulnerability Scanning"])
+def analyze_headers(
+    url: str = Query(..., description="Target URL (e.g., https://google.com)"),
+    api_key: str = Security(verify_api_key)
+):
+    # Eğer URL http/https ile başlamıyorsa, otomatik ekle
+    if not url.startswith("http"):
+        url = "https://" + url
+
+    try:
+        # Sunucuya GET isteği at ve başlıkları (headers) al
+        response = requests.get(url, timeout=5)
+        headers = response.headers
+        
+        # Kontrol edilecek kritik güvenlik başlıkları (Security Headers)
+        security_headers = {
+            "Strict-Transport-Security": "Missing (Vulnerable to MITM)",
+            "Content-Security-Policy": "Missing (Vulnerable to XSS)",
+            "X-Frame-Options": "Missing (Vulnerable to Clickjacking)",
+            "X-Content-Type-Options": "Missing (Vulnerable to MIME Sniffing)"
+        }
+        
+        present_headers = {}
+        missing_headers = []
+        
+        for header, risk in security_headers.items():
+            if header in headers:
+                present_headers[header] = headers[header]
+            else:
+                missing_headers.append({header: risk})
+                
+        return {
+            "status": "success",
+            "target": url,
+            "grade": f"{len(present_headers)}/{len(security_headers)}",
+            "present_headers": present_headers,
+            "missing_headers": missing_headers
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Request failed: {str(e)}")
+
 @app.get("/api/v1/tools/dns-enum", tags=["Reconnaissance"])
 def enumerate_subdomains(
     domain: str = Query(..., description="Target domain (e.g., google.com)"),
     api_key: str = Security(verify_api_key)
 ):
-    # Kapsamlı taramalar (exhaustive scans) API'yi yavaşlatır, bu yüzden şimdilik kısa bir liste kullanıyoruz.
     wordlist = ["dev", "api", "test", "vpn", "admin", "staging", "mail", "www", "portal", "old"]
     found = []
     
     for word in wordlist:
         target = f"{word}.{domain}"
         try:
-            # A kaydı (A record) için DNS sunucusunu sorgula
             answers = dns.resolver.resolve(target, 'A')
             ips = [rdata.to_text() for rdata in answers]
             found.append({"subdomain": target, "ips": ips})
         except Exception:
-            # NXDOMAIN veya Timeout hatalarını yoksay (ignore)
             pass
 
     return {"status": "success", "target": domain, "found_count": len(found), "data": found}
-
 
 @app.get("/api/v1/vulnerabilities", tags=["Threat Intelligence"])
 def get_critical_vulns(
@@ -58,7 +96,6 @@ def get_critical_vulns(
     response = query.execute()
     return {"status": "success", "total_records": len(response.data), "data": response.data}
 
-
 @app.post("/api/v1/tools/log-parser", tags=["Log Analysis"])
 def parse_logs(
     logs: str = Body(..., media_type="text/plain", description="Paste raw log lines here"), 
@@ -66,7 +103,6 @@ def parse_logs(
 ):
     threats = []
 
-    # 1. Detect Brute Force
     failed_logins = len(re.findall(r"Failed password", logs))
     if failed_logins >= 2:
         threats.append({
@@ -75,7 +111,6 @@ def parse_logs(
             "details": f"{failed_logins} failed login attempts detected."
         })
 
-    # 2. Detect Log Wiping (Anti-Forensics)
     if re.search(r"cat /dev/null >", logs) or re.search(r"rm -rf /var/log", logs):
         threats.append({
             "type": "Log Wiping", 
