@@ -30,16 +30,13 @@ def analyze_headers(
     url: str = Query(..., description="Target URL (e.g., https://google.com)"),
     api_key: str = Security(verify_api_key)
 ):
-    # Eğer URL http/https ile başlamıyorsa, otomatik ekle
     if not url.startswith("http"):
         url = "https://" + url
 
     try:
-        # Sunucuya GET isteği at ve başlıkları (headers) al
         response = requests.get(url, timeout=5)
         headers = response.headers
         
-        # Kontrol edilecek kritik güvenlik başlıkları (Security Headers)
         security_headers = {
             "Strict-Transport-Security": "Missing (Vulnerable to MITM)",
             "Content-Security-Policy": "Missing (Vulnerable to XSS)",
@@ -84,6 +81,45 @@ def enumerate_subdomains(
             pass
 
     return {"status": "success", "target": domain, "found_count": len(found), "data": found}
+
+@app.post("/api/v1/tools/iam-analyzer", tags=["Cloud Security"])
+def analyze_iam_policy(
+    policy: dict = Body(..., description="Paste raw AWS IAM JSON Policy here"),
+    api_key: str = Security(verify_api_key)
+):
+    threats = []
+    statements = policy.get("Statement", [])
+    
+    # If Statement is a single dict, convert to list for iteration
+    if isinstance(statements, dict):
+        statements = [statements]
+
+    for idx, stmt in enumerate(statements):
+        effect = stmt.get("Effect", "")
+        action = stmt.get("Action", "")
+        resource = stmt.get("Resource", "")
+
+        if effect == "Allow":
+            # Check for Action wildcard
+            if action == "*" or (isinstance(action, list) and "*" in action):
+                threats.append({
+                    "statement_id": idx,
+                    "vulnerability": "Privilege Escalation",
+                    "severity": "Critical",
+                    "detail": "Action wildcard '*' allows execution of any AWS command."
+                })
+            
+            # Check for Resource wildcard
+            if resource == "*" or (isinstance(resource, list) and "*" in resource):
+                threats.append({
+                    "statement_id": idx,
+                    "vulnerability": "Over-permissive Data Access",
+                    "severity": "High",
+                    "detail": "Resource wildcard '*' grants access to all resources in the account."
+                })
+
+    status_msg = "vulnerable" if threats else "secure"
+    return {"status": status_msg, "threat_count": len(threats), "data": threats}
 
 @app.get("/api/v1/vulnerabilities", tags=["Threat Intelligence"])
 def get_critical_vulns(
