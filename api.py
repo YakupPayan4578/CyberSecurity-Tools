@@ -155,3 +155,22 @@ def parse_logs(
         })
 
     return {"status": "analyzed", "threats_detected": len(threats), "data": threats}
+
+@app.get("/api/v1/tools/s3-scanner", tags=["Cloud Security"])
+def scan_s3_bucket(
+    bucket_name: str = Query(..., description="Target S3 Bucket Name (e.g., sirket-gizli-yedek-2026)"),
+    api_key: str = Security(verify_api_key)
+):
+    url = f"https://{bucket_name}.s3.amazonaws.com/"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            return {"status": "vulnerable", "bucket": bucket_name, "exposure": "Public Read (Critical)", "details": "Bucket contents are publicly accessible. (200 OK)"}
+        elif response.status_code == 403:
+            return {"status": "secure", "bucket": bucket_name, "exposure": "None", "details": "Access Denied (Secure). (403 Forbidden)"}
+        elif response.status_code == 404:
+            return {"status": "not_found", "bucket": bucket_name, "details": "Bucket does not exist. (404 Not Found)"}
+        else:
+            return {"status": "unknown", "bucket": bucket_name, "status_code": response.status_code}
+    except requests.RequestException as e:
+        return {"status": "error", "message": f"Failed to connect: {str(e)}"}
