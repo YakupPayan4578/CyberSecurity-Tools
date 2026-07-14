@@ -163,7 +163,7 @@ def scan_s3_bucket(
 ):
     url = f"https://{bucket_name}.s3.amazonaws.com/"
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=5, verify=False)
         if response.status_code == 200:
             return {"status": "vulnerable", "bucket": bucket_name, "exposure": "Public Read (Critical)", "details": "Bucket contents are publicly accessible. (200 OK)"}
         elif response.status_code == 403:
@@ -174,3 +174,43 @@ def scan_s3_bucket(
             return {"status": "unknown", "bucket": bucket_name, "status_code": response.status_code}
     except requests.RequestException as e:
         return {"status": "error", "message": f"Failed to connect: {str(e)}"}
+
+@app.post("/api/v1/tools/sg-analyzer", tags=["Cloud Security"])
+def analyze_security_group(
+    sg_rules: dict = Body(..., description="Paste raw Security Group JSON here"),
+    api_key: str = Security(verify_api_key)
+):
+    threats = []
+    dangerous_ports = {
+        22: "SSH", 
+        3389: "RDP", 
+        3306: "MySQL", 
+        5432: "PostgreSQL", 
+        27017: "MongoDB"
+    }
+
+    permissions = sg_rules.get("IpPermissions", [])
+    
+    for rule in permissions:
+        from_port = rule.get("FromPort")
+        to_port = rule.get("ToPort")
+        ip_ranges = rule.get("IpRanges", [])
+
+        # Check if any dangerous port is exposed to the entire internet
+        for ip_range in ip_ranges:
+            cidr_ip = ip_range.get("CidrIp", "")
+            if cidr_ip == "0.0.0.0/0" or cidr_ip == "::/0":
+                # Check if the port range includes any of our dangerous ports
+                for d_port, service in dangerous_ports.items():
+                    if from_port is not None and to_port is not None:
+                        if from_port <= d_port <= to_port:
+                            threats.append({
+                                "vulnerability": "Publicly Exposed Management/Database Port",
+                                "severity": "Critical",
+                                "service": service,
+                                "port": d_port,
+                                "detail": f"Port {d_port} ({service}) is open to 0.0.0.0/0 (Entire Internet)."
+                            })
+
+    status_msg = "vulnerable" if threats else "secure"
+    return {"status": status_msg, "threat_count": len(threats), "data": threats}
