@@ -214,3 +214,27 @@ def analyze_security_group(
 
     status_msg = "vulnerable" if threats else "secure"
     return {"status": status_msg, "threat_count": len(threats), "data": threats}
+
+@app.post("/api/v1/tools/secret-scanner", tags=["Cloud Security"])
+def scan_hardcoded_secrets(
+    source_code: dict = Body(..., description="Paste raw source code text here format: {'text': 'code'}"),
+    api_key: str = Security(verify_api_key)
+):
+    code_text = source_code.get("text", "")
+    threats = []
+    
+    # Regex pattern for AWS Access Key ID (Starts with AKIA, ASIA, etc., 20 chars total)
+    aws_key_pattern = r"\b(AKIA|ASIA|AGPA|AIDA|AROA|AIPA)[A-Z0-9]{16}\b"
+    
+    found_keys = re.findall(aws_key_pattern, code_text)
+    
+    if found_keys:
+        threats.append({
+            "vulnerability": "Hardcoded AWS Access Key",
+            "severity": "Critical",
+            "detail": f"Found {len(found_keys)} potential AWS Access Key(s) embedded in source code.",
+            "impact": "If committed to a public repository, attackers can use these keys for Cryptojacking or data theft."
+        })
+        
+    status_msg = "vulnerable" if threats else "secure"
+    return {"status": status_msg, "threat_count": len(threats), "data": threats}
